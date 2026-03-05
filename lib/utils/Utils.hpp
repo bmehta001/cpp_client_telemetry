@@ -96,6 +96,15 @@ namespace MAT_NS_BEGIN {
 
     unsigned hashCode(const char* str, int h = 0);
 
+    /// Compute SHA1 of the input and return a 40-character lowercase hex string.
+    std::string sha1HexHash(const std::string& input);
+
+    /// Hash a PII string field: returns the SHA1 hex hash, or empty if input is empty.
+    inline std::string hashPiiField(const std::string& value)
+    {
+        return value.empty() ? std::string() : sha1HexHash(value);
+    }
+
 } MAT_NS_END
 
 #endif

@@ -545,3 +545,95 @@ TEST(EventPropertiesDecoratorTests, DropPiiPartA_StripsValues)
     EXPECT_THAT(record->extSdk[0].installId, Eq(""));
     EXPECT_THAT(record->cV, Eq(""));
 }
+
+TEST(EventPropertiesDecoratorTests, Decorate_EventTag_HashPii)
+{
+    NullLogManager logManager;
+    EventPropertiesDecorator decorator(logManager);
+    auto record = PopulateRecordForDropPii();
+    EventProperties props {"TestEvent"};
+    props.SetPolicyBitFlags(MICROSOFT_EVENTTAG_HASH_PII);
+    EventLatency latency = EventLatency::EventLatency_Normal;
+
+    EXPECT_TRUE(decorator.decorate(*record, latency, props));
+    EXPECT_TRUE(record->flags & RECORD_FLAGS_EVENTTAG_HASH_PII);
+}
+
+TEST(EventPropertiesDecoratorTests, HashPiiPartA_HashesValues)
+{
+    NullLogManager logManager;
+    TestEventPropertiesDecorator decorator(logManager);
+    auto record = PopulateRecordForDropPii();
+
+    decorator.hashPiiPartA(*record);
+
+    EXPECT_THAT(record->extProtocol[0].ticketKeys, SizeIs(0));
+    EXPECT_THAT(record->extDevice[0].localId, Eq("h:93007a5f5253151dc7ce9215cbf3a0d0e6a87323"));
+    EXPECT_THAT(record->extDevice[0].authId, Eq("59dba7375b9304a3c93b3662af967805f8610af8"));
+    EXPECT_THAT(record->extDevice[0].authSecId, Eq("a194c0543840ad7397931e429ba68835471477c5"));
+    EXPECT_THAT(record->extDevice[0].id, Eq("87ea5dfc8b8e384d848979496e706390b497e547"));
+    EXPECT_THAT(record->extUser[0].localId, Eq("93007a5f5253151dc7ce9215cbf3a0d0e6a87323"));
+    EXPECT_THAT(record->extUser[0].authId, Eq("59dba7375b9304a3c93b3662af967805f8610af8"));
+    EXPECT_THAT(record->extUser[0].id, Eq("87ea5dfc8b8e384d848979496e706390b497e547"));
+    EXPECT_THAT(record->extSdk[0].seq, Eq(0));
+    EXPECT_THAT(record->extSdk[0].epoch, Eq("8ac1f753a4a72dbd2ec50ce35d690db02b5b8a0f"));
+    EXPECT_THAT(record->extSdk[0].installId, Eq("9a77a57454be74e303480887c34588e794a119cc"));
+    EXPECT_THAT(record->cV, Eq(""));
+}
+
+TEST(EventPropertiesDecoratorTests, HashPiiPartA_IsDeterministic)
+{
+    NullLogManager logManager;
+    TestEventPropertiesDecorator decorator(logManager);
+    auto record1 = PopulateRecordForDropPii();
+    auto record2 = PopulateRecordForDropPii();
+
+    decorator.hashPiiPartA(*record1);
+    decorator.hashPiiPartA(*record2);
+
+    EXPECT_THAT(record1->extDevice[0].localId, Eq(record2->extDevice[0].localId));
+    EXPECT_THAT(record1->extDevice[0].id, Eq(record2->extDevice[0].id));
+    EXPECT_THAT(record1->extUser[0].id, Eq(record2->extUser[0].id));
+}
+
+TEST(EventPropertiesDecoratorTests, HashPiiPartA_EmptyFieldsStayEmpty)
+{
+    NullLogManager logManager;
+    TestEventPropertiesDecorator decorator(logManager);
+    auto record = std::unique_ptr<Record>(new Record{});
+    record->extProtocol.push_back(CsProtocol::Protocol{});
+    record->extDevice.push_back(CsProtocol::Device{});
+    record->extUser.push_back(CsProtocol::User{});
+    record->extSdk.push_back(CsProtocol::Sdk{});
+
+    decorator.hashPiiPartA(*record);
+
+    // localId gets "h:" prefix even when hashing empty string
+    EXPECT_THAT(record->extDevice[0].localId, StartsWith("h:"));
+    // Other empty fields remain empty
+    EXPECT_THAT(record->extDevice[0].authId, Eq(""));
+    EXPECT_THAT(record->extDevice[0].authSecId, Eq(""));
+    EXPECT_THAT(record->extDevice[0].id, Eq(""));
+    EXPECT_THAT(record->extUser[0].localId, Eq(""));
+    EXPECT_THAT(record->extUser[0].authId, Eq(""));
+    EXPECT_THAT(record->extUser[0].id, Eq(""));
+}
+
+TEST(EventPropertiesDecoratorTests, Decorate_DropPiiTakesPriorityOverHashPii)
+{
+    NullLogManager logManager;
+    TestEventPropertiesDecorator decorator(logManager);
+    auto record = PopulateRecordForDropPii();
+    EventProperties props {"TestEvent"};
+    props.SetPolicyBitFlags(MICROSOFT_EVENTTAG_DROP_PII | MICROSOFT_EVENTTAG_HASH_PII);
+    EventLatency latency = EventLatency::EventLatency_Normal;
+
+    EXPECT_TRUE(decorator.decorate(*record, latency, props));
+
+    // DROP takes priority: localId should be random, not hashed
+    EXPECT_THAT(record->extDevice[0].localId, Eq(decorator.GetRandomLocalId()));
+    EXPECT_THAT(record->extDevice[0].authId, Eq(""));
+    EXPECT_THAT(record->extDevice[0].id, Eq(""));
+    EXPECT_TRUE(record->flags & RECORD_FLAGS_EVENTTAG_DROP_PII);
+    EXPECT_TRUE(record->flags & RECORD_FLAGS_EVENTTAG_HASH_PII);
+}

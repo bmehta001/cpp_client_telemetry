@@ -87,6 +87,39 @@ namespace MAT_NS_BEGIN {
             record.cV = "";
         }
 
+        void hashPiiPartA(::CsProtocol::Record& record)
+        {
+            // MICROSOFT_EVENTTAG_HASH_PII tag functionality:
+            // Hash Pii EventTag obscures Part A Pii data client-side using SHA1.
+            // Unlike DROP, the hashed values are deterministic, allowing correlation
+            // (e.g. DAU/MAU metrics) without revealing the original identifiers.
+            // The flag has no effect on Part C Pii data.
+            //
+
+            // clear tickets because these provide a way to identify the end-user
+            // and cannot be meaningfully hashed
+            record.extProtocol[0].ticketKeys.clear();
+
+            // hash Pii in Device extension
+            record.extDevice[0].localId = "h:" + hashPiiField(record.extDevice[0].localId);
+            record.extDevice[0].authId = hashPiiField(record.extDevice[0].authId);
+            record.extDevice[0].authSecId = hashPiiField(record.extDevice[0].authSecId);
+            record.extDevice[0].id = hashPiiField(record.extDevice[0].id);
+
+            // hash Pii in User extension
+            record.extUser[0].localId = hashPiiField(record.extUser[0].localId);
+            record.extUser[0].authId = hashPiiField(record.extUser[0].authId);
+            record.extUser[0].id = hashPiiField(record.extUser[0].id);
+
+            // hash epoch and installId, reset seq
+            record.extSdk[0].seq = 0;
+            record.extSdk[0].epoch = hashPiiField(record.extSdk[0].epoch);
+            record.extSdk[0].installId = hashPiiField(record.extSdk[0].installId);
+
+            // clear correlation vector
+            record.cV = "";
+        }
+
         bool decorate(::CsProtocol::Record& record, EventLatency& latency, EventProperties const& eventProperties)
         {
             if (latency == EventLatency_Unspecified)
@@ -126,12 +159,14 @@ namespace MAT_NS_BEGIN {
             int64_t flags = 0;
 
             // We must remap from one bitfield set to another, no way to bit-shift :(
-            // At the moment 1DS SDK in direct upload mode supports DROP and MARK tags only:
             flags |= (tags & MICROSOFT_EVENTTAG_MARK_PII) ? RECORD_FLAGS_EVENTTAG_MARK_PII : 0;
+            flags |= (tags & MICROSOFT_EVENTTAG_HASH_PII) ? RECORD_FLAGS_EVENTTAG_HASH_PII : 0;
             flags |= (tags & MICROSOFT_EVENTTAG_DROP_PII) ? RECORD_FLAGS_EVENTTAG_DROP_PII : 0;
 
-            // Caller asked to drop Pii from Part A of that event
+            // Caller asked to drop or hash Pii from Part A of that event
+            // DROP is more restrictive than HASH, so it takes priority
             bool tagDropPii = bool(tags & MICROSOFT_EVENTTAG_DROP_PII);
+            bool tagHashPii = bool(tags & MICROSOFT_EVENTTAG_HASH_PII);
 
             if (EventPersistence_Critical == eventProperties.GetPersistence())
             {
@@ -447,10 +482,14 @@ namespace MAT_NS_BEGIN {
                 ext.erase(CorrelationVector::PropertyName);
             }
 
-            // scrub if MICROSOFT_EVENTTAG_DROP_PII is set
+            // scrub if MICROSOFT_EVENTTAG_DROP_PII is set (takes priority over HASH)
             if (tagDropPii)
             {
                 dropPiiPartA(record);
+            }
+            else if (tagHashPii)
+            {
+                hashPiiPartA(record);
             }
 
             return true;

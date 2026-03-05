@@ -34,6 +34,10 @@
 #include <locale>
 #include <codecvt>
 
+extern "C" {
+#include "sha1.h"
+}
+
 namespace MAT_NS_BEGIN {
     MATSDK_LOG_INST_COMPONENT_NS("MATSDK", "MS App Telemetry client")
 } MAT_NS_END
@@ -244,6 +248,26 @@ namespace MAT_NS_BEGIN {
     unsigned hashCode(const char* str, int h)
     {
         return (unsigned)(!str[h] ? 5381 : ((unsigned long long)hashCode(str, h + 1) * (unsigned)33) ^ str[h]);
+    }
+
+    std::string sha1HexHash(const std::string& input)
+    {
+        unsigned char digest[20] = { 0 };
+        SHA1_CTX ctx;
+        SHA1Init(&ctx);
+        SHA1Update(&ctx, reinterpret_cast<const unsigned char*>(input.data()),
+                   static_cast<uint32_t>(input.size()));
+        SHA1Final(digest, &ctx);
+
+        static const char hex[] = "0123456789abcdef";
+        std::string result;
+        result.reserve(40);
+        for (int i = 0; i < 20; ++i)
+        {
+            result.push_back(hex[(digest[i] >> 4) & 0x0f]);
+            result.push_back(hex[digest[i] & 0x0f]);
+        }
+        return result;
     }
 
 } MAT_NS_END
