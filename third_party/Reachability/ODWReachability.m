@@ -432,7 +432,10 @@ static int kTimeoutDurationInSeconds = 10;
 
     SCNetworkReachabilityFlags flags = 0;
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     if(SCNetworkReachabilityGetFlags(self.reachabilityRef, &flags))
+#pragma clang diagnostic pop
     {
         // Check we're REACHABLE
         if(flags & kSCNetworkReachabilityFlagsReachable)
