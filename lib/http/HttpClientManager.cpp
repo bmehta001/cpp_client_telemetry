@@ -10,15 +10,6 @@
 #include <assert.h>
 #include <algorithm>
 
-#ifdef linux
-#include <unistd.h>
-#ifdef _POSIX_PRIORITY_SCHEDULING
-#include <sched.h>
-#else
-#define sched_yield()
-#endif
-#endif
-
 #ifdef _WIN32
 #define USE_SYNC_HTTPRESPONSE_HANDLER
 #else
@@ -109,6 +100,11 @@ namespace MAT_NS_BEGIN {
         PAL::scheduleTask(&m_taskDispatcher, 0, this, &HttpClientManager::onHttpResponse, callback);
     }
 
+    std::chrono::milliseconds HttpClientManager::getCancelAllRequestsDrainTimeout() const
+    {
+        return std::chrono::milliseconds(5000);
+    }
+
     /* This method may get executed synchronously on Windows from handleSendRequest in case of connection failure */
     void HttpClientManager::onHttpResponse(HttpCallback* callback)
     {
@@ -137,6 +133,7 @@ namespace MAT_NS_BEGIN {
             m_httpCallbacks.remove(callback);
         }
 
+        m_httpCallbacksCv.notify_all();
         delete callback;
     }
 
@@ -149,14 +146,9 @@ namespace MAT_NS_BEGIN {
     void HttpClientManager::cancelAllRequests()
     {
         cancelAllRequestsAsync();
-        while (true)
-        {
-            {
-                LOCKGUARD(m_httpCallbacksMtx);
-                if (m_httpCallbacks.empty())
-                    break;
-            }
-            std::this_thread::yield();
+        std::unique_lock<std::recursive_mutex> lock(m_httpCallbacksMtx);
+        if (!m_httpCallbacksCv.wait_for(lock, getCancelAllRequestsDrainTimeout(), [this] { return m_httpCallbacks.empty(); })) {
+            LOG_WARN("Timed out waiting for %zu HTTP callback(s) to finish after cancelling requests", m_httpCallbacks.size());
         }
     }
 

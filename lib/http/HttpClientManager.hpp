@@ -10,6 +10,8 @@
 #include "system/Route.hpp"
 #include "ILogManager.hpp"
 
+#include <chrono>
+#include <condition_variable>
 #include <list>
 #include <mutex>
 
@@ -32,6 +34,7 @@ class HttpClientManager
 
         size_t requestCount() const
         {
+            std::lock_guard<std::recursive_mutex> lock(m_httpCallbacksMtx);
             return m_httpCallbacks.size();
         }
 
@@ -48,13 +51,15 @@ class HttpClientManager
 
         void handleSendRequest(EventsUploadContextPtr const& ctx);
         virtual void scheduleOnHttpResponse(HttpCallback* callback);
+        virtual std::chrono::milliseconds getCancelAllRequestsDrainTimeout() const;
         void onHttpResponse(HttpCallback* callback);
         bool cancelAllRequestsAsync();
 
         ILogManager&              m_logManager;
         IHttpClient&              m_httpClient;
         ITaskDispatcher&          m_taskDispatcher;
-        std::recursive_mutex      m_httpCallbacksMtx;
+        mutable std::recursive_mutex m_httpCallbacksMtx;
+        std::condition_variable_any m_httpCallbacksCv;
         std::list<HttpCallback*>  m_httpCallbacks;
 };
 
