@@ -1477,6 +1477,51 @@ TEST_F(BasicFuncTests, raceBetweenUploadAndShutdownMultipleLogManagers)
 }
 #endif
 
+#if defined(MATSDK_PAL_CPP11) && !defined(ANDROID)
+TEST_F(BasicFuncTests, uploadNowImmediatelyFlushAndTeardownDoesNotCrash)
+{
+    for (size_t i = 0; i < 20; ++i)
+    {
+        CleanStorage();
+        receivedRequests.clear();
+
+        auto& configuration = LogManager::GetLogConfiguration();
+        configuration[CFG_INT_TRACE_LEVEL_MASK] = 0;
+        configuration[CFG_INT_TRACE_LEVEL_MIN] = ACTTraceLevel_Warn;
+        configuration[CFG_INT_SDK_MODE] = SdkModeTypes::SdkModeTypes_CS;
+        configuration[CFG_INT_RAM_QUEUE_SIZE] = 4096 * 20;
+        configuration[CFG_STR_CACHE_FILE_PATH] = TEST_STORAGE_FILENAME;
+        configuration[CFG_INT_MAX_TEARDOWN_TIME] = 1;
+        configuration[CFG_STR_COLLECTOR_URL] = serverAddress.c_str();
+        configuration[CFG_MAP_HTTP][CFG_BOOL_HTTP_COMPRESSION] = false;
+        configuration[CFG_MAP_METASTATS_CONFIG][CFG_INT_METASTATS_INTERVAL] = 0;
+        configuration[CFG_MAP_METASTATS_CONFIG]["enabled"] = false;
+        configuration["name"] = "Issue1391UploadNowTeardown";
+        configuration["version"] = "1.0.0";
+        configuration["config"] = { { "host", "Issue1391UploadNowTeardown" } };
+
+        auto logger = LogManager::Initialize(TEST_TOKEN, configuration);
+        LogManager::SetTransmitProfile(TransmitProfile_RealTime);
+        LogManager::ResumeTransmission();
+
+        for (size_t j = 0; j < 50; ++j)
+        {
+            EventProperties event("BasicFuncTests.Issue1391UploadNowTeardown");
+            event.SetLatency(EventLatency_Normal);
+            event.SetProperty("iteration", static_cast<int64_t>(i));
+            event.SetProperty("index", static_cast<int64_t>(j));
+            logger->LogEvent(event);
+        }
+
+        ASSERT_EQ(LogManager::UploadNow(), STATUS_SUCCESS);
+        ASSERT_EQ(LogManager::FlushAndTeardown(), STATUS_SUCCESS);
+        ASSERT_EQ(PAL::PALTest::GetPalRefCount(), 0);
+    }
+
+    CleanStorage();
+}
+#endif
+
 TEST_F(BasicFuncTests, logManager_getLogManagerInstance_uninitializedReturnsNull)
 {
     auto lm = LogManager::GetInstance();
