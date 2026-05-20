@@ -7,6 +7,11 @@
 #include "NullObjects.hpp"
 #include "ILogManager.hpp"
 
+#include <atomic>
+#include <ctime>
+#include <thread>
+#include <vector>
+
 using namespace testing;
 using namespace MAT;
 
@@ -42,6 +47,73 @@ class HttpClientManagerTests : public StrictMock<Test> {
     MOCK_METHOD1(resultRequestDone, void(EventsUploadContextPtr const &));
 };
 
+namespace {
+
+class CapturingHttpClient : public IHttpClient
+{
+  public:
+    virtual IHttpRequest* CreateRequest() override
+    {
+        return new SimpleHttpRequest("CapturingHttpClient");
+    }
+
+    virtual void SendRequestAsync(IHttpRequest*, IHttpResponseCallback* callback) override
+    {
+        callbacks.push_back(callback);
+    }
+
+    virtual void CancelRequestAsync(std::string const&) override
+    {
+    }
+
+    std::vector<IHttpResponseCallback*> callbacks;
+};
+
+EventsUploadContextPtr makeUploadContext(size_t index)
+{
+    auto ctx = std::make_shared<EventsUploadContext>();
+    auto id = std::string("CancelAllRequestsRaceRepro") + std::to_string(index);
+    auto req = new SimpleHttpRequest(id);
+
+    ctx->httpRequestId = req->GetId();
+    ctx->httpRequest = req;
+    ctx->recordIdsAndTenantIds["r1"] = "t1";
+    ctx->latency = EventLatency_Normal;
+    ctx->packageIds["tenant1-token"] = 0;
+
+    return ctx;
+}
+
+class BlockingRequestDone
+{
+  public:
+    RouteSink<BlockingRequestDone, EventsUploadContextPtr const&> sink{this, &BlockingRequestDone::onRequestDone};
+
+    void onRequestDone(EventsUploadContextPtr const&)
+    {
+        entered.store(true, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+            PAL::sleep(1);
+        }
+    }
+
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+};
+
+uint64_t getCurrentThreadCpuTimeNs()
+{
+#if defined(CLOCK_THREAD_CPUTIME_ID)
+    timespec ts = {};
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0) {
+        return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
+    }
+#endif
+    return 0;
+}
+
+} // namespace
+
 
 TEST_F(HttpClientManagerTests, HandlesRequestFlow)
 {
@@ -73,4 +145,47 @@ TEST_F(HttpClientManagerTests, HandlesRequestFlow)
 
     EXPECT_THAT(ctx->httpResponse, rspRef);
     EXPECT_THAT(ctx->durationMs, Gt(199));
+}
+
+// Disabled because this intentionally reproduces the #1437 / #1429 100% CPU spin.
+// HttpClientManager::onHttpResponse invokes requestDone while holding m_httpCallbacksMtx.
+// Before #1429, cancelAllRequests() ignored that mutex and yield-spun on m_httpCallbacks.empty().
+// Run with:
+//   out/tests/unittests/UnitTests --gtest_filter=HttpClientManagerSpinReproTests.DISABLED_CancelAllRequestsDoesNotSpinWhileResponseCallbackHoldsCallbackLock --gtest_also_run_disabled_tests
+TEST(HttpClientManagerSpinReproTests, DISABLED_CancelAllRequestsDoesNotSpinWhileResponseCallbackHoldsCallbackLock)
+{
+    CapturingHttpClient httpClient;
+    HttpClientManager4Test hcm(httpClient);
+    BlockingRequestDone blockingRequestDone;
+    hcm.requestDone >> blockingRequestDone.sink;
+
+    auto firstCtx = makeUploadContext(0);
+    hcm.sendRequest(firstCtx);
+    ASSERT_EQ(1U, hcm.requestCount());
+
+    std::thread responseThread([&]() {
+        auto response = new SimpleHttpResponse(firstCtx->httpRequestId);
+        response->m_result = HttpResult_Aborted;
+        httpClient.callbacks[0]->OnHttpResponse(response);
+    });
+
+    while (!blockingRequestDone.entered.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    std::atomic<uint64_t> cancelCpuNs(0);
+    std::thread cancelThread([&]() {
+        auto startCpuNs = getCurrentThreadCpuTimeNs();
+        hcm.cancelAllRequests();
+        cancelCpuNs.store(getCurrentThreadCpuTimeNs() - startCpuNs, std::memory_order_release);
+    });
+
+    PAL::sleep(250);
+    blockingRequestDone.release.store(true, std::memory_order_release);
+
+    responseThread.join();
+    cancelThread.join();
+
+    EXPECT_LT(cancelCpuNs.load(std::memory_order_acquire), 50000000ULL);
+    EXPECT_EQ(0U, hcm.requestCount());
 }
