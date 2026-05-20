@@ -147,12 +147,12 @@ TEST_F(HttpClientManagerTests, HandlesRequestFlow)
     EXPECT_THAT(ctx->durationMs, Gt(199));
 }
 
-// Disabled because this intentionally reproduces the #1437 / #1429 100% CPU spin.
+// Reproduces the #1437 / #1429 100% CPU spin.
 // HttpClientManager::onHttpResponse invokes requestDone while holding m_httpCallbacksMtx.
 // Before #1429, cancelAllRequests() ignored that mutex and yield-spun on m_httpCallbacks.empty().
 // Run with:
-//   out/tests/unittests/UnitTests --gtest_filter=HttpClientManagerSpinReproTests.DISABLED_CancelAllRequestsDoesNotSpinWhileResponseCallbackHoldsCallbackLock --gtest_also_run_disabled_tests
-TEST(HttpClientManagerSpinReproTests, DISABLED_CancelAllRequestsDoesNotSpinWhileResponseCallbackHoldsCallbackLock)
+//   out/tests/unittests/UnitTests --gtest_filter=HttpClientManagerSpinReproTests.CancelAllRequestsDoesNotSpinWhileResponseCallbackHoldsCallbackLock
+TEST(HttpClientManagerSpinReproTests, CancelAllRequestsDoesNotSpinWhileResponseCallbackHoldsCallbackLock)
 {
     CapturingHttpClient httpClient;
     HttpClientManager4Test hcm(httpClient);
