@@ -11,9 +11,7 @@
 #include "http/HttpClient_WinRt.hpp"
 #include "utils/StringUtils.hpp"
 
-#include <algorithm>
 #include <memory>
-#include <sstream>
 #include <vector>
 
 #include <pplcancellation_token.h>

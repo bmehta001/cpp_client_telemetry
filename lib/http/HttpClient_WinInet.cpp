@@ -14,7 +14,6 @@
 #include <Wincrypt.h>
 #include <WinInet.h>
 
-#include <algorithm>
 #include <memory>
 #include <sstream>
 #include <vector>
