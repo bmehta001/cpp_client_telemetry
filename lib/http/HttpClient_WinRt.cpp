@@ -21,7 +21,6 @@
 #include <pplawait.h>
 #include <vccorlib.h>
 #include <Roapi.h>
-#include <WinInet.h>
 
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;

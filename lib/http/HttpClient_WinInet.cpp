@@ -571,7 +571,7 @@ void HttpClient_WinInet::SetMsRootCheck(bool enforceMsRoot)
 }
 
 /// <summary>
-/// Determines whether MS-Roted server cert check required.
+/// Determines whether an MS-Rooted server certificate check is required.
 /// </summary>
 /// <returns>
 ///   <c>true</c> if [MS-Rooted server cert check required]; otherwise, <c>false</c>.
